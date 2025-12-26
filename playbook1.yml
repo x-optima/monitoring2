@@ -1,0 +1,178 @@
+- name: playbook1
+  gather_facts: true
+  hosts: zabbixservers
+  vars:
+    ansible_ssh_user: yc-user
+    zabbix_db_password: "zabbix_pwd"
+    zabbix_server_port: "10051:10051"
+    zabbix_web_port: "8080:8080"
+  become: yes
+
+  pre_tasks:
+    - name: Validating the ssh port is open
+      wait_for:
+        host: "{{ (ansible_ssh_host|default(ansible_host))|default(inventory_hostname) }}"
+        port: 22
+        delay: 5
+        timeout: 300
+        state: started
+        search_regex: OpenSSH
+
+  tasks:
+    - name: Загрузить переменные из файла
+      ansible.builtin.include_vars:
+        file: vars.yml
+
+    - name: Полная очистка Docker репозиториев (радикально)
+      ansible.builtin.shell: |
+        sudo rm -f /etc/apt/sources.list.d/*docker*
+        sudo rm -f /etc/apt/sources.list.d/docker*
+        sudo rm -f /etc/apt/sources.list.d/download*
+        sudo rm -f /etc/apt/keyrings/docker*
+        sudo apt update --allow-releaseinfo-change
+      become: yes
+      ignore_errors: yes
+
+    - name: Очистить APT кэш полностью
+      ansible.builtin.command: apt clean
+      become: yes
+
+    - name: Установить базовые зависимости
+      ansible.builtin.apt:
+        name:
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: no  # ← Без update_cache!
+      become: yes
+
+    - name: Создать keyrings директорию
+      ansible.builtin.file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+      become: yes
+
+    - name: Добавить Docker GPG (официальный)
+      ansible.builtin.shell: |
+        curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+      args:
+        creates: /etc/apt/keyrings/docker.gpg
+      become: yes
+
+    - name: Права на GPG ключ
+      ansible.builtin.file:
+        path: /etc/apt/keyrings/docker.gpg
+        mode: '0644'
+      become: yes
+
+    - name: Создать ЧИСТЫЙ Docker репозиторий
+      ansible.builtin.copy:
+        content: "deb [arch=amd64 signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu {{ ansible_distribution_release }} stable"
+        dest: /etc/apt/sources.list.d/docker.list
+      become: yes
+
+    - name: ТЕПЕРЬ обновить APT
+      ansible.builtin.apt:
+        update_cache: yes
+      become: yes
+
+
+    - name: Установить Docker CE + Compose
+      ansible.builtin.apt:
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+        state: present
+      become: yes
+
+        
+    - name: Добавить yc-user в группу docker
+      ansible.builtin.user:
+        name: yc-user
+        groups: docker
+        append: yes
+      become: yes
+
+    - name: Перезапустить docker после добавления пользователя
+      ansible.builtin.systemd:
+        name: docker
+        state: restarted
+      become: yes
+
+    # - name: Создать Docker сеть для Zabbix
+    #   community.docker.docker_network:
+    #     name: zabbix-net
+    #     state: present
+
+    - name: Проверить доступные Docker сети
+      ansible.builtin.shell: docker network ls
+      register: docker_networks
+      changed_when: false
+
+    - name: Показать Docker сети
+      ansible.builtin.debug:
+        var: docker_networks.stdout_lines
+
+    - name: Запустить PostgreSQL контейнер для Zabbix
+      community.docker.docker_container:
+        name: zabbix-postgres
+        image: postgres
+        state: started
+        restart_policy: unless-stopped
+        network_mode: host
+        env:
+          POSTGRES_DB: zabbix
+          POSTGRES_USER: zabbix
+          POSTGRES_PASSWORD: "{{ zabbix_db_password }}"
+        volumes:
+          - zabbix_postgres_data:/var/lib/postgresql
+
+    - name: Запустить Zabbix Server PostgreSQL
+      community.docker.docker_container:
+        name: zabbix-server-pgsql
+        image: zabbix/zabbix-server-pgsql:alpine-7.4-latest
+        state: started
+        restart_policy: unless-stopped
+        network_mode: host
+        ports:
+          - "{{ zabbix_server_port }}"
+        env:
+          DB_SERVER_HOST: "127.0.0.1"
+          DB_SERVER_PORT: "5432"
+          POSTGRES_USER: zabbix
+          POSTGRES_PASSWORD: "{{ zabbix_db_password }}"
+          POSTGRES_DB: zabbix
+          ZBX_JAVAGATEWAY: "127.0.0.1"
+  
+
+    - name: Запустить Zabbix Web интерфейс Apache PostgreSQL
+      community.docker.docker_container:
+        name: zabbix-web-apache-pgsql
+        image: zabbix/zabbix-web-apache-pgsql:alpine-7.4-latest 
+        state: started
+        restart_policy: unless-stopped
+        network_mode: host
+        ports:
+          - "{{ zabbix_web_port }}"
+        env:
+          ZBX_SERVER_HOST: "127.0.0.1"
+          DB_SERVER_HOST: "127.0.0.1"
+          DB_SERVER_PORT: "5432"          
+          POSTGRES_USER: zabbix
+          POSTGRES_PASSWORD: "{{ zabbix_db_password }}"
+          POSTGRES_DB: zabbix
+
+    - name: Проверить статус Zabbix контейнеров
+      community.docker.docker_container_info:
+        name: "{{ item }}"
+      loop:
+        - zabbix-postgres
+        - zabbix-server-pgsql
+        - zabbix-web-apache-pgsql
+      register: container_status
