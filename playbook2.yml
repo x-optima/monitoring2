@@ -103,7 +103,35 @@
         state: restarted
       become: yes
 
-    - name: Установить Zabbix Agent Docker
+    - name: Создать каталог для Zabbix agent файлов
+      file:
+        path: /srv/zabbix-agent
+        state: directory
+        mode: "0755"
+      become: yes
+
+    - name: Развернуть скрипт fio/date
+      copy:
+        dest: /srv/zabbix-agent/userparam_fio_date.sh
+        mode: "0755"
+        content: |
+          #!/bin/sh
+          case "$1" in
+            1) echo "КВН" ;;
+            2) date +"%Y-%m-%d %H:%M:%S" ;;
+            *) echo "unknown" ;;
+          esac
+      become: yes
+
+    - name: Развернуть UserParameter конфиг
+      copy:
+        dest: /srv/zabbix-agent/zabbix_agent2_userparams.conf
+        mode: "0644"
+        content: |
+          UserParameter=fio.date[*],/etc/zabbix/userparam_fio_date.sh "$1"
+      become: yes
+
+    - name: Установить Zabbix Agent Docker c UserParameter
       community.docker.docker_container:
         name: zabbix-agent
         image: zabbix/zabbix-agent2:alpine-7.4-latest
@@ -115,18 +143,19 @@
           ZBX_HOSTNAME: "{{ inventory_hostname }}"
           ZBX_HOSTNAME_ITEM: system.hostname
           ZBX_SERVERACTIVE_HOST: "{{ groups['zabbixservers'][0] }}:10051"
-          ZBX_DEBUGLEVEL: "4" 
+          ZBX_DEBUGLEVEL: "4"
+          ZBX_UNSAFEUSERPARAMETERS: "1"
+        volumes:
+          - /srv/zabbix-agent/userparam_fio_date.sh:/etc/zabbix/userparam_fio_date.sh:ro
+          - /srv/zabbix-agent/zabbix_agent2_userparams.conf:/etc/zabbix/zabbix_agent2.d/userparams.conf:ro
       become: yes
 
-    - name: Разрешить CPU ключи в Zabbix Agent Docker (БЕЗ ПОИСКА!)
-      shell: docker exec zabbix-agent sh -c "echo 'AllowKey=system.cpu.*' >> /etc/zabbix/zabbix_agent2.conf && echo 'AllowKey=system.*' >> /etc/zabbix/zabbix_agent2.conf" || true
-      become: yes
-      ignore_errors: yes
+
 
     - name: Перезапустить Zabbix Agent контейнер
       shell: docker restart zabbix-agent || true
       become: yes
       ignore_errors: yes
 
-  handlers:  # Удалить handlers - они не нужны
+ 
 
