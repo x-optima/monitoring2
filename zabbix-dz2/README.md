@@ -161,21 +161,3 @@ __ДОРАБОТКА__
 <a href="../playbook1.yml" target="_blank"> Файл playbook1.yml</a>  
 <a href="../playbook2.yml" target="_blank"> Файл playbook2.yml</a>  
 
-
-### Задание 7
-
-1) Пишем скрипт в виде задачи в ansible playbook2.yml. Ссылка на файл приложена.  
-2)zz
-
-
-
-![Скриншот 1](screenshots/scr7_1.png)  
-![Скриншот 2](screenshots/scr7_2.png)  
-![Скриншот 3](screenshots/scr7_3.png)  
-![Скриншот 4](screenshots/scr7_4.png)  
-![Скриншот 5](screenshots/scr7_5.png) 
-
-Ссылки на Ansible playbooks.  
-
-<a href="../playbook1.yml" target="_blank"> Файл playbook1.yml</a>  
-<a href="../playbook2.yml" target="_blank"> Файл playbook2.yml</a>  
