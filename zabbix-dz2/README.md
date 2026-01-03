@@ -161,3 +161,39 @@ __ДОРАБОТКА__
 <a href="../playbook1.yml" target="_blank"> Файл playbook1.yml</a>  
 <a href="../playbook2.yml" target="_blank"> Файл playbook2.yml</a>  
 
+### Задание 7
+
+1) Дополнил ansible playbook2.yml скриптом Python. Ссылка на файл приложена.  
+2) Включил все варианты пользовательских параметров в файл конфигурации zabbix агента с различными ключами
+3) В веб интерфейсе сервера создал в пользовательском шаблоне польщзовательские параметры с интервалами опроса и типом ТЕКСТ.
+4) Получил значения параметров а Latest data   
+
+![Скриншот 1](screenshots/scr7_1.png)  
+![Скриншот 2](screenshots/scr7_2.png)  
+![Скриншот 3](screenshots/scr7_3.png)  
+
+
+Ссылки на Ansible playbooks.  
+
+<a href="../playbook2.yml" target="_blank"> Файл playbook2.yml</a>  
+
+### Задание 8
+
+1) Удалил все хосты из списка. 
+2) В разделе Data Collections-Discovery - два создаем правила обнаружения агентов Discovery Rule (правый верхний угол).    
+3) В разделеAlerts-Discovery actions cоздаем Действие.  
+4) Во вкладках создаем действие две операции где привязываем наш шаблон.  
+5) В Monitoring- Discovery видим наши хосты.
+6) Проваливаемся и видим items.
+7) Шаблон привязан 
+
+![Скриншот 1](screenshots/scr8_1.png)  
+![Скриншот 2](screenshots/scr8_2.png)  
+![Скриншот 4](screenshots/scr8_4.png)  
+![Скриншот 5](screenshots/scr8_5.png)  
+
+
+### Задание 9  
+
+Не выполнялось. 
+

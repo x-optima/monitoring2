@@ -1,3 +1,5 @@
+# Запускаем командой ansible-playbook -i hosts.ini playbook1.yml --ask-vault-pass
+
 - name: playbook1
   gather_facts: true
   hosts: zabbixservers

@@ -1,9 +1,14 @@
+# Запускаем командой ansible-playbook -i hosts.ini playbook2.yml --ask-vault-pass
+
 - name: playbook2
   gather_facts: true
   hosts: zabbixclients
   vars:
     ansible_ssh_user: yc-user
- 
+    script_dest: /srv/zabbix-agent/my_python_script.py  
+    script_owner: root
+    script_group: root
+    script_mode: '0755' 
   become: yes
 
   pre_tasks:
@@ -88,7 +93,6 @@
           - docker-compose-plugin
         state: present
       become: yes
-
         
     - name: Добавить yc-user в группу docker
       ansible.builtin.user:
@@ -123,15 +127,78 @@
           esac
       become: yes
 
-    - name: Развернуть UserParameter конфиг
+    - name: Копировать Python скрипт В ПРАВИЛЬНОЕ МЕСТО
+      copy:
+        dest: "{{ script_dest }}"  # /srv/zabbix-agent/my_python_script.py
+        content: |
+          import sys
+          import subprocess
+          import re
+          from datetime import datetime
+
+          FIO = "KVN"
+
+          if len(sys.argv) < 2:
+              print(f"Usage: {sys.argv[0]} <command> [arg]")
+              sys.exit(1)
+
+          cmd = sys.argv[1]
+
+          if cmd == '-ping':
+              if len(sys.argv) < 3:
+                  print("Usage: ./script.py -ping <host>")
+                  sys.exit(1)
+              try:
+                  result = subprocess.check_output(
+                      ['ping', '-c', '1', sys.argv[2]], 
+                      text=True, 
+                      stderr=subprocess.STDOUT,
+                      timeout=10
+                  )
+                  match = re.search(r'time=(.*?) ms', result)
+                  if match:
+                      print(match.group(1).strip())
+                  else:
+                      print("Ping failed or no time")
+              except subprocess.TimeoutExpired:
+                  print("Ping timeout")
+              except subprocess.CalledProcessError:
+                  print("Ping failed")
+              except Exception:
+                  print("Ping error")
+          elif cmd == '-simple_print':
+              if len(sys.argv) < 3:
+                  print("Usage: ./script.py -simple_print <text>")
+                  sys.exit(1)
+              print(sys.argv[2])
+          elif cmd == '-1':
+              print(FIO)
+          elif cmd == '-2':
+              print(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))
+          else:
+              print(f"unknown input: {cmd}")
+        owner: "{{ script_owner }}"
+        group: "{{ script_group }}"
+        mode: "{{ script_mode }}"
+        backup: yes
+
+    - name: UserParameter конфиг для Docker
       copy:
         dest: /srv/zabbix-agent/zabbix_agent2_userparams.conf
         mode: "0644"
         content: |
-          UserParameter=fio.date[*],/etc/zabbix/userparam_fio_date.sh "$1"
+          # KVN UserParameters - ПРАВИЛЬНЫЕ пути ВНУТРИ контейнера!
+          UserParameter=custom.script.fio,/usr/bin/python3 /usr/local/bin/my_python_script.py -1
+          UserParameter=custom.script.date,/usr/bin/python3 /usr/local/bin/my_python_script.py -2
+          UserParameter=custom.script.ping[*],/usr/bin/python3 /usr/local/bin/my_python_script.py -ping $1
+          UserParameter=custom.script.simple_print[*],/usr/bin/python3 /usr/local/bin/my_python_script.py -simple_print $1
+          UserParameter=custom.script.unknown_value[*],/usr/bin/python3 /usr/local/bin/my_python_script.py -unknown $1
+          UserParameter=fio.date[*],/etc/zabbix/userparam_fio_date.sh $1
+        backup: yes
       become: yes
 
-    - name: Установить Zabbix Agent Docker c UserParameter
+
+    - name: Установить Zabbix Agent Docker 
       community.docker.docker_container:
         name: zabbix-agent
         image: zabbix/zabbix-agent2:alpine-7.4-latest
@@ -146,12 +213,36 @@
           ZBX_DEBUGLEVEL: "4"
           ZBX_UNSAFEUSERPARAMETERS: "1"
         volumes:
+          - /srv/zabbix-agent/my_python_script.py:/usr/local/bin/my_python_script.py:ro  
           - /srv/zabbix-agent/userparam_fio_date.sh:/etc/zabbix/userparam_fio_date.sh:ro
           - /srv/zabbix-agent/zabbix_agent2_userparams.conf:/etc/zabbix/zabbix_agent2.d/userparams.conf:ro
       become: yes
 
+    - name: Установить Python3 в Zabbix Agent Alpine (с root правами)
+      shell: |
+        docker exec --user root zabbix-agent sh -c "
+          apk update && 
+          apk add --no-cache python3 py3-pip &&
+          ln -sf /usr/bin/python3 /usr/bin/python &&
+          echo 'Python3 OK!'
+        "
+      become: yes
 
-
+      
+    - name: Тест Python скрипта В КОНТЕЙНЕРЕ
+      shell: "docker exec zabbix-agent {{ item.command }} || echo 'FAILED'"
+      register: tests
+      loop:
+        - { command: "/usr/bin/python3 /usr/local/bin/my_python_script.py -1", name: "Python FIO" }
+        - { command: "/usr/bin/python3 /usr/local/bin/my_python_script.py -2", name: "Python Date" }
+        - { command: "/srv/zabbix-agent/userparam_fio_date.sh 1", name: "Bash FIO" }
+      changed_when: false
+      
+    - name: Результаты тестов
+      debug:
+        msg: "{{ item.item.name }}: {{ item.stdout }}"
+      loop: "{{ tests.results }}"
+      when: item is succeeded
     - name: Перезапустить Zabbix Agent контейнер
       shell: docker restart zabbix-agent || true
       become: yes
